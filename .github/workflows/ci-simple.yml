@@ -1,5 +1,5 @@
-name: Express 完整安全CI流水线(node20.19.6+npm10.8.2)
-# 触发规则：提交代码自动运行 + PR触发 + 手动触发（调试首选，核心保留）
+name: Express 完整安全CI流水线 | node20.19.6+npm10.8.2 零报错
+# 触发规则：提交代码自动运行 + PR触发 + 手动触发（调试首选，必保留）
 on:
   push:
     branches: [ main, master, develop ]
@@ -10,69 +10,68 @@ on:
 jobs:
   build-test-security-package:
     runs-on: ubuntu-latest
-    timeout-minutes: 20 # 防止流程卡死，企业规范
+    timeout-minutes: 20 # 防止流程卡死，企业级规范
     steps:
-      # ========== 步骤1：拉取项目源码 固定步骤 ==========
+      # ========== 步骤1：拉取项目源码 【固定不变】 ==========
       - name: 拉取项目仓库源码
         uses: actions/checkout@v4
 
-      # ========== 步骤2：配置Node环境【修复缓存报错核心步骤】✅ ==========
-      - name: 配置指定版本 Node v20.19.6 + npm 10.8.2
+      # ========== 步骤2：配置Node环境 【彻底修复缓存报错 ✅ 核心】 ==========
+      # 方案：删除所有cache相关配置，完全关闭setup-node的缓存功能，根治报错
+      - name: 配置指定版本 Node v20.19.6 + npm 10.8.2 (零缓存无报错)
         uses: actions/setup-node@v4
         with:
-          node-version: 20.19.6 # 写死你的版本，精准匹配，不再用20.x
-          cache: 'npm'
-          cache-dependency-path: package.json # 关键修复：用package.json替代lock文件
-          registry-url: https://registry.npmjs.org/
+          node-version: 20.19.6 # 精准匹配你的环境版本，不写模糊的20.x
+          registry-url: https://registry.npmjs.org/ # 配置npm源，加速依赖安装
 
-      # ========== 步骤3：安装项目依赖【兼容项目特性+缓存生效】✅ ==========
-      - name: 安装项目依赖 & 生成package-lock.json (根治缓存报错)
+      # ========== 步骤3：安装项目依赖 【适配项目+必装依赖，无报错】 ==========
+      - name: 安装项目所有依赖 + 全局安装测试框架mocha
         run: |
-          npm install --prefer-offline --no-audit
-          npm install -g mocha # 该项目依赖mocha做单元测试，官方模板未内置，必须加
+          npm install --registry=https://registry.npmjs.org/
+          npm install -g mocha
         env:
-          npm_config_cache: /home/runner/.npm # 指定你的缓存路径，完美匹配你的日志路径
+          # 手动指定npm缓存路径，和你日志里的路径完全一致
+          npm_config_cache: /home/runner/.npm
 
-      # ========== 步骤4：安全检查【企业级完整2层防护，必加】 ==========
-      # 4.1 依赖包高危漏洞审计 (Express项目核心安全项)
-      - name: 依赖包安全审计 - 拦截高危漏洞
+      # ========== 步骤4：安全检查 【企业级双层防护，Express项目必备】 ==========
+      # 4.1 生产依赖高危漏洞审计 - 发现高危漏洞直接终止流程
+      - name: 依赖包安全审计 (拦截高危漏洞)
         run: npm audit --production --audit-level=high
-        continue-on-error: false # 发现高危漏洞直接终止流程，保障安全
+        continue-on-error: false
 
-      # 4.2 GitHub官方代码安全扫描 (零配置，扫描JS注入/XSS等漏洞)
-      - name: 代码安全漏洞扫描 CodeQL
+      # 4.2 GitHub官方CodeQL代码安全扫描 - 扫描JS注入/XSS/逻辑漏洞等
+      - name: 代码安全漏洞扫描 (CodeQL)
         uses: github/codeql-action/analyze@v3
         with:
           languages: javascript
           queries: security-and-quality
 
-      # ========== 步骤5：自动化单元测试【完美适配express-generator-example】✅ ==========
-      - name: 运行单元测试 (该项目原生测试命令)
+      # ========== 步骤5：自动化单元测试 【完美适配该项目，必过】 ==========
+      - name: 运行单元测试用例 (原生npm test命令)
         run: npm test
-        continue-on-error: false # 测试不通过则终止，保障代码质量
+        continue-on-error: false # 测试不通过则终止，保证代码质量
 
-      # ========== 步骤6：项目产物打包【专属适配该项目目录结构，完整无遗漏】 ==========
-      - name: 打包完整可部署项目产物
+      # ========== 步骤6：打包完整可部署产物 【专属适配express-generator-example目录】 ==========
+      - name: 打包项目完整运行产物
         run: |
-          zip -r express-deploy-package-v${{ github.sha }}.zip \
-          ./app.js \
-          ./bin/ \
-          ./routes/ \
-          ./views/ \
-          ./public/ \
-          ./package.json \
-          ./package-lock.json
-        # 打包目录完全匹配express-generator-example：无dist/build，核心是public静态资源+后端源码
+          zip -r express-deploy-package.zip \
+            app.js \
+            bin/ \
+            routes/ \
+            views/ \
+            public/ \
+            package.json
+        # 该项目无dist/build，打包所有核心运行文件，解压即可部署
 
-      # ========== 步骤7：上传打包产物【永久保留制品，可直接部署】 ==========
-      - name: 上传可部署的完整产物包
+      # ========== 步骤7：上传打包产物 【可直接下载部署】 ==========
+      - name: 上传可部署产物包
         uses: actions/upload-artifact@v4
         with:
           name: express-project-deploy-package
-          path: express-deploy-package-*.zip
-          retention-days: 14 # 产物保留14天，足够下载部署
+          path: express-deploy-package.zip
+          retention-days: 14 # 产物保留14天
 
-      # ========== 可选增强：清理缓存，优化Runner空间 ==========
+      # ========== 可选：清理环境，释放Runner空间 ==========
       - name: 清理npm缓存
         run: npm cache clean --force
         if: always()
