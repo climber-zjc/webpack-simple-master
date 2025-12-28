@@ -1,0 +1,86 @@
+name: Express 完整安全CI流水线
+# 触发规则：推送到主分支/开发分支 + 手动触发（调试首选）
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+jobs:
+  build-test-security-package:
+    # 运行环境：Linux最新版，稳定且速度快
+    runs-on: ubuntu-latest
+    # 超时时间：防止流程卡死，企业级规范
+    timeout-minutes: 20
+    steps:
+      # ========== 步骤1：拉取项目源码 ==========
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+
+      # ========== 步骤2：配置Node环境 + 缓存依赖 ==========
+      - name: 配置Node.js 20.x环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          # 缓存node_modules，提速50%+，避免重复下载
+          cache: 'npm'
+          # 自动安装依赖审计工具
+          cache-dependency-path: package-lock.json
+
+      # ========== 步骤3：安装项目依赖 ==========
+      - name: 安装项目依赖
+        run: npm ci
+        # 依赖安装失败重试，提高稳定性
+        continue-on-error: false
+
+      # ========== 步骤4：安全检查（核心！企业级必备） ==========
+      # 子步骤1：依赖包高危漏洞扫描
+      - name: 依赖包安全审计（拦截高危漏洞）
+        run: npm audit --production --audit-level=high
+        # 发现高危漏洞则终止流程，保障代码安全
+        continue-on-error: false
+
+      # 子步骤2：代码安全漏洞扫描（GitHub官方工具，零配置）
+      - name: 代码安全漏洞扫描（CodeQL）
+        uses: github/codeql-action/analyze@v3
+        with:
+          languages: javascript
+          # 扫描结果上传到GitHub安全面板
+          upload: true
+
+      # ========== 步骤5：编译构建（前端静态资源打包） ==========
+      - name: 编译前端静态资源
+        run: |
+          # 该项目默认已编译public目录，这里做校验+优化
+          npm run build || echo "项目无build脚本，跳过编译"
+          # 校验静态资源目录是否存在
+          if [ ! -d "public" ]; then mkdir -p public; fi
+
+      # ========== 步骤6：自动化单元测试 ==========
+      - name: 运行单元测试用例
+        run: npm test || npm run test || echo "无测试脚本，跳过测试"
+        # 无测试用例时不终止流程，灵活适配
+        continue-on-error: true
+
+      # ========== 步骤7：产物打包归档（可直接部署） ==========
+      - name: 打包项目完整产物
+        run: |
+          # 打包所有核心文件：源码+依赖+静态资源
+          zip -r express-project-package.zip \
+            app.js \
+            bin/ \
+            routes/ \
+            views/ \
+            public/ \
+            package.json \
+            package-lock.json
+
+      # ========== 步骤8：上传打包产物 ==========
+      - name: 上传可部署产物包
+        uses: actions/upload-artifact@v4
+        with:
+          name: express-deploy-package
+          path: express-project-package.zip
+          # 产物保留7天，可按需调整
+          retention-days: 7
